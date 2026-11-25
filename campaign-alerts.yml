@@ -1,0 +1,53 @@
+# Put this file at .github/workflows/campaign-alerts.yml in your GitHub repo.
+name: Campaign alerts
+
+on:
+  schedule:
+    # Every 12 hours (UTC). Each run costs money on pay-per-result scrapers,
+    # so don't make this more frequent until you've checked your Apify bill.
+    - cron: "0 1,13 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run = send alerts, dry-run = print only, inspect = show what the scraper returns"
+        type: choice
+        default: dry-run
+        options: [run, dry-run, inspect]
+
+permissions:
+  contents: write   # lets the bot save seen.json so you don't get duplicate alerts
+
+concurrency:
+  group: campaign-alerts
+  cancel-in-progress: false
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run bot
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          APIFY_ACTOR: ${{ vars.APIFY_ACTOR }}
+          APIFY_INPUT: ${{ vars.APIFY_INPUT }}
+          APIFY_MAX_CHARGE_USD: ${{ vars.APIFY_MAX_CHARGE_USD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python bot.py ${{ inputs.mode == 'inspect' && '--inspect' || inputs.mode == 'dry-run' && '--dry-run' || '' }}
+
+      - name: Save seen list
+        run: |
+          if [ -f seen.json ]; then
+            git config user.name "alert-bot"
+            git config user.email "alert-bot@users.noreply.github.com"
+            git add seen.json
+            git diff --cached --quiet || (git commit -m "update seen list" && git push)
+          fi
